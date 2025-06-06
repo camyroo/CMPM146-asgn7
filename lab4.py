@@ -6,10 +6,10 @@ import PIL
 import random
 
 # TODO 1: Choose a digit
-digit = None
+digit = 5
 
 # TODO 2: Change number of training iterations for classifier
-n0 = 5
+n0 = 50
 
 def to_list(img):
     return list(map(int, img.view((28*28,)).tolist()))
@@ -52,9 +52,20 @@ loss_fn = torch.nn.BCELoss()
 class Discriminator(nn.Module):
     def __init__(self):
         super().__init__()
-        self.linear1 = nn.Linear(784,1)
+        self.hidden1 = nn.Linear(784, 256)
+        self.hidden2 = nn.Linear(256, 128)
+        self.leakyReLu = nn.LeakyReLU(0.2)
+        self.output = nn.Linear(128, 1)
+        self.sigmoid = nn.Sigmoid()
+
     def forward(self, x):
-        return self.linear1(x)
+        x = self.leakyReLu(self.hidden1(x))
+        x = self.leakyReLu(self.hidden2(x))
+        x = self.sigmoid(self.output(x))
+        return x
+
+
+        
        
 # TODO 4
 # Implement training loop for the classifier:
@@ -65,8 +76,16 @@ class Discriminator(nn.Module):
 #     calculate the gradient (loss.backward())
 #     print i and the loss
 #     perform an optimizer step
+
 def train_classifier(opt, model, x, y):
-    pass
+    for i in range(n0):
+        opt.zero_grad()
+        y_pred = model(x)
+        loss = loss_fn(y_pred, y)
+        loss.backward()
+        print(f"Iteration {i}")
+        print(f"Loss: {loss.item()}")
+        opt.step()
     
 # TODO 5
 # Instantiate the network and the optimizer
@@ -84,12 +103,69 @@ def train_classifier(opt, model, x, y):
 #     Precision (which percentage of images identified as your chosen digit was actually that digit: TP/(TP+FP))
 #     Recall (which percentage of your chosen digit was identified as such: TP/(TP+FN))
 def classify(x_train, y_train, x_validation, labels_validation):
-    pass
+    model = Discriminator()
+    opt = torch.optim.Adam(model.parameters(), lr=0.001)
+    train_classifier(opt, model, x_train, y_train)
     
+    model.eval()
+    with torch.no_grad():
+        y_pred = model(x_validation).view(-1)
+        predicted = (y_pred > 0.5).float()
+        true = (labels_validation == digit).float()
+    
+    TP = ((predicted == 1) & (true == 1)).sum().item()
+    FN = ((predicted == 0) & (true == 1)).sum().item()
+    FP = ((predicted == 1) & (true == 0)).sum().item()
+    TN = ((predicted == 0) & (true == 0)).sum().item()
+
+    print("\nFP/TN Results")
+    for i in range(10):
+        mask = (labels_validation == i)
+        fp_count = predicted[mask].sum().item()
+        total = mask.sum().item()
+        tn = total - digit
+        print("Digit", i)
+        print("False Positives (FP):", int(fp_count))
+        print("True Negatives (TN):", int(tn))
+
+    total = TP + TN + FP + FN
+    if total > 0:
+        accuracy = (TP + TN) / total
+    else:
+        accuracy = 0
+
+    if (TP + FP) > 0:
+        precision = TP / (TP + FP)
+    else:
+        precision = 0
+
+    if (TP + FN) > 0:
+        recall = TP / (TP + FN)
+    else:
+        recall = 0
+
+    print("\nResults")
+    print(f"Accuracy: {accuracy * 100:.2f}%")
+    print(f"Precision: {precision * 100:.2f}%")
+    print(f"Recall: {recall * 100:.2f}%")
+
+    mismatch_indices = []
+    for i in range(len(predicted)):
+        if predicted[i] != true[i]:
+            mismatch_indices.append(i)
+
+    for i in range(min(5, len(mismatch_indices))):
+        idx = mismatch_indices[i]
+        label_value = int(labels_validation[idx])
+        filename = "misclassified_" + str(i) + "_label" + str(label_value) + ".png"
+        show_image(x_validation[idx], filename, scale=SCALE_01)
+
+
+
 # Task 2 (GAN) starts here
 
 # TODO 6: Change number of total training iterations for GAN, for the discriminator and for the generator
-n = 5
+n = 10
 n1 = 5
 n2 = 5
 
@@ -98,24 +174,54 @@ n2 = 5
 class Generator(nn.Module):
     def __init__(self):
         super().__init__()
-        self.linear1 = nn.Linear(100, 784)
+        self.model = nn.Sequential(
+            nn.Linear(100, 128),
+            nn.LeakyReLU(0.2),
+            nn.Linear(128, 256),
+            nn.LeakyReLU(0.2),
+            nn.Linear(256, 512),
+            nn.LeakyReLU(0.2),
+            nn.Linear(512, 784),
+            nn.Sigmoid() 
+        )
+
     def forward(self, x):
-        return self.linear1(x)
+        return self.model(x)
+
 
 # TODO 8
 # Implement training loop for the discriminator, given real and fake data:
 # for i in range(n1):
 #     zero gradients
+
 #     calculate predictions for the x known as real 
 #     calculate loss, comparing the predictions with a tensor consisting of 1s (we want all of these samples to be classified as real)
 #     calculate the gradient (loss_true.backward())
+
 #     calculate predictions for the x known as fake
 #     calculate loss, comparing the predictions with a tensor consisting of 0s (we want all of these samples to be classified as fake)
 #     calculate the gradient (loss_false.backward())
+
 #     print i and both of the loss values
 #     perform an optimizer step
 def train_discriminator(opt, discriminator, x_true, x_false):
-    print("Training discriminator")
+    for i in range(n1):
+        opt.zero_grad()
+
+        y_real = discriminator(x_true)
+        y_pred_real = torch.ones_like(y_real) 
+        loss_real = loss_fn(y_real, y_pred_real)
+        loss_real.backward()
+
+        y_fake = discriminator(x_false)
+        y_pred_fake = torch.zeros_like(y_fake) 
+        loss_fake = loss_fn(y_fake, y_pred_fake)
+        loss_fake.backward()
+
+        opt.step()
+
+        print(f"Discriminator Iter {i} - Real Loss: {loss_real.item():.4f}, Fake Loss: {loss_fake.item():.4f}")
+
 
 # TODO 9 
 # Implement training loop for the generator:
@@ -129,7 +235,22 @@ def train_discriminator(opt, discriminator, x_true, x_false):
 #     print i and the loss
 #     perform an optimization step
 def train_generator(opt, generator, discriminator):
-    print("Training generator")
+    for i in range(n2):
+        opt.zero_grad()
+
+        noise = torch.randn(100, 100)
+        x_fake = generator(noise)
+
+        y_pred = discriminator(x_fake)
+        y_target = torch.ones_like(y_pred)
+
+        loss = loss_fn(y_pred, y_target)
+        loss.backward()
+        opt.step()
+
+        print(f"Generator Iter {i} - Loss: {loss.item():.4f}")
+
+
         
 
 # TODO 10
@@ -141,11 +262,33 @@ def train_generator(opt, generator, discriminator):
 #    call train_generator 
 #    generate some images with the current generator, and add a random selection of old fake images (e.g. 100 random old ones, and 100new ones = 200 in total)
 #    this will be your new collection of fake images
-#    save some of the current fake images to files (use a filename like "sample_%d_%d.png"%(i,j) so you have some samples from each iteration so you can see if the network improves)
+#    save some of the current fake images to files (use a filename like "sample_%d_%i.png"%(i,j) so you have some samples from each iteration so you can see if the network improves)
 # If you read the todos above, your training code will print the loss in each iteration. The loss for the discriminator and the generator should decrease each time their respective training functions are called 
 # The images should start to look like numbers after just a few (could be after 1 or 2 already, or 3-10) iterations of *this* loop
 def gan(x_real):
-    show_image(x_real[0], "train_0.png", scale=SCALE_01)
+    generator = Generator()
+    discriminator = Discriminator()
+    opt_g = torch.optim.Adam(generator.parameters(), lr=0.0005)
+    opt_d = torch.optim.Adam(discriminator.parameters(), lr=0.0005)
+
+    x_fake = torch.rand((100, 784)) 
+
+    for i in range(n):
+        print(f"\nIteration {i}")
+
+        train_discriminator(opt_d, discriminator, x_real[:100], x_fake)
+
+        train_generator(opt_g, generator, discriminator)
+
+        new_noise = torch.randn(100, 100)
+        new_fakes = generator(new_noise).detach()
+
+        keep = x_fake[torch.randperm(100)[:50]]  
+        x_fake = torch.cat([keep, new_fakes[:50]], dim=0) 
+
+        for j in range(5):
+            show_image(new_fakes[j], f"sample_{i}_{j}.png", scale=SCALE_01)
+
     
 
 
